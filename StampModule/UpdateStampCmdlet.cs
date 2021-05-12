@@ -14,9 +14,20 @@ namespace RZ.PowerShell.StampModule
     [OutputType(typeof(string[]))]
     public sealed class UpdateStampCmdlet : Cmdlet
     {
+        const string FullRevision = "FullRevision";
+        const string RevisionOnly = "RevisionOnly";
+        const string NewMinor = "NewMinor";
+        const string NewMajor = "NewMajor";
+
         [Parameter(Position = 0, Mandatory = false, ValueFromPipeline = true, ValueFromPipelineByPropertyName = true)]
         [ValidateNotNullOrEmpty]
-        public string? Folder{ get; set; }
+        public FilePath? Folder{ get; set; }
+
+        [ValidateSet(FullRevision, RevisionOnly, NewMinor, NewMajor)]
+        [PSDefaultValue(Value = FullRevision, Help = "Increase Minor and Revision")]
+        public string Strategy{ get; set; } = FullRevision;
+
+        public bool ResetBuild{ get; set; }
 
         const string InitialVersion = "1.0.0.0";
         static readonly XName VersionTag = XName.Get("Version");
@@ -40,14 +51,13 @@ namespace RZ.PowerShell.StampModule
                 targetFramework.Ancestors(XName.Get("PropertyGroup"))
                                .TryFirst()
                                .Match(identity,
-                                      () => throw new ApplicationException(
-                                                "Cannot find the proper TargetFramework's property group!"));
+                                      () => throw new ApplicationException("Cannot find the proper TargetFramework's property group!"));
             var version = GetTag(propertyGroup, VersionTag, InitialVersion);
             var assemblyVersion = GetTag(propertyGroup, AssemblyVersionTag, string.Empty);
             var fileVersion = GetTag(propertyGroup, FileVersionTag, string.Empty);
 
             var currentVersion = version.Value;
-            var newVersion = IncreaseRevision(currentVersion);
+            var newVersion = IncreaseVersion(currentVersion);
 
             fileVersion.Value = assemblyVersion.Value = version.Value = newVersion;
 
@@ -55,9 +65,30 @@ namespace RZ.PowerShell.StampModule
             WriteObject(new {Project = filepath, NewVersion = newVersion, OldVersion = currentVersion});
         }
 
-        static string IncreaseRevision(string version){
+        string IncreaseVersion(string version){
+            var result = Strategy switch{
+                FullRevision => IncreaseVersion(Revision, IncreaseVersion(Build, version)),
+                RevisionOnly => IncreaseVersion(Revision, version),
+                NewMinor     => ResetVersion(IncreaseVersion(Minor, version), Revision),
+                NewMajor     => ResetVersion(IncreaseVersion(Major, version), Minor, Revision),
+                _            => version
+            };
+            return ResetBuild ? ResetVersion(result, Build) : result;
+        }
+
+        const int Major = 0;
+        const int Minor = 1;
+        const int Revision = 2;
+        const int Build = 3;
+        static string IncreaseVersion(int digit, string version){
             var parts = version.Split('.');
-            parts[3] = (int.Parse(parts[3]) + 1).ToString();
+            parts[digit] = (int.Parse(parts[digit]) + 1).ToString();
+            return string.Join('.', parts);
+        }
+
+        static string ResetVersion(string version, params int[] digits){
+            var parts = version.Split('.');
+            digits.Iter(d => parts[d] = "0");
             return string.Join('.', parts);
         }
 
