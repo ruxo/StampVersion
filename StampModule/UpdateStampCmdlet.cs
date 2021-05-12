@@ -49,12 +49,10 @@ namespace RZ.PowerShell.StampModule
             var currentVersion = version.Value;
             var newVersion = IncreaseRevision(currentVersion);
 
-            Console.WriteLine("{0}: {1} --> {2}", filepath, currentVersion, newVersion);
-
             fileVersion.Value = assemblyVersion.Value = version.Value = newVersion;
 
             xdoc.Save(filepath);
-            WriteObject(new {filepath, newVersion, currentVersion});
+            WriteObject(new {Project = filepath, NewVersion = newVersion, OldVersion = currentVersion});
         }
 
         static string IncreaseRevision(string version){
