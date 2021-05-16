@@ -12,7 +12,7 @@ namespace RZ.PowerShell.StampModule
 {
     [Cmdlet(VerbsData.Update, "Stamp")]
     [OutputType(typeof(string[]))]
-    public sealed class UpdateStampCmdlet : Cmdlet
+    public sealed class UpdateStampCmdlet : PSCmdlet
     {
         const string FullRevision = "FullRevision";
         const string RevisionOnly = "RevisionOnly";
@@ -23,10 +23,12 @@ namespace RZ.PowerShell.StampModule
         [ValidateNotNullOrEmpty]
         public FilePath? Folder{ get; set; }
 
+        [Parameter(Position = 1)]
         [ValidateSet(FullRevision, RevisionOnly, NewMinor, NewMajor)]
         [PSDefaultValue(Value = FullRevision, Help = "Increase Minor and Revision")]
         public string Strategy{ get; set; } = FullRevision;
 
+        [Parameter(Position = 2)]
         public bool ResetBuild{ get; set; }
 
         const string InitialVersion = "1.0.0.0";
@@ -34,11 +36,11 @@ namespace RZ.PowerShell.StampModule
         static readonly XName AssemblyVersionTag = XName.Get("AssemblyVersion");
         static readonly XName FileVersionTag = XName.Get("FileVersion");
 
-        protected override void ProcessRecord(){
-            var target = Folder ?? Directory.GetCurrentDirectory();
+        protected override void ProcessRecord() {
+            Environment.CurrentDirectory = SessionState.Path.CurrentLocation.Path;
+            var target = Path.GetFullPath(Folder ?? "./");
 
-            Directory.EnumerateFiles(target, "*.??proj")
-                     .Iter(ModifyProjectFile);
+            Directory.EnumerateFiles(target, "*.??proj", SearchOption.AllDirectories).Iter(ModifyProjectFile);
         }
 
         void ModifyProjectFile(FilePath filepath){
@@ -50,14 +52,14 @@ namespace RZ.PowerShell.StampModule
             var propertyGroup =
                 targetFramework.Ancestors(XName.Get("PropertyGroup"))
                                .TryFirst()
-                               .Match(identity,
-                                      () => throw new ApplicationException("Cannot find the proper TargetFramework's property group!"));
+                               .Match(identity, () => throw new ApplicationException("Cannot find the proper TargetFramework's property group!"));
             var version = GetTag(propertyGroup, VersionTag, InitialVersion);
             var assemblyVersion = GetTag(propertyGroup, AssemblyVersionTag, string.Empty);
             var fileVersion = GetTag(propertyGroup, FileVersionTag, string.Empty);
 
             var currentVersion = version.Value;
-            var newVersion = IncreaseVersion(currentVersion);
+            var increasedVersion = IncreaseVersion(currentVersion);
+            var newVersion = ResetBuild ? ResetDigit(increasedVersion) : increasedVersion;
 
             fileVersion.Value = assemblyVersion.Value = version.Value = newVersion;
 
@@ -74,6 +76,17 @@ namespace RZ.PowerShell.StampModule
                 _            => version
             };
             return ResetBuild ? ResetVersion(result, Build) : result;
+        }
+
+        string ResetDigit(string version) {
+            var parts = version.Split('.');
+            var preverseDigits = Strategy switch{
+                NewMajor => 1,
+                NewMinor => 2,
+                _        => 3
+            };
+            var newParts = parts.Take(preverseDigits).Concat(Enumerable.Repeat("0", 4 - preverseDigits));
+            return string.Join('.', newParts);
         }
 
         const int Major = 0;
